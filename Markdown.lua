@@ -46,7 +46,6 @@ local function parseText(md)
 	for c in characters(md) do
 		local modifierType = ModifierLookup[c]
 		if modifierType then
-			warn(c)
 			if last(stack) == modifierType then
 				s = s .. ModifierTags[modifierType][2]
 				table.remove(stack)
