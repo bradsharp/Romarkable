@@ -1,228 +1,141 @@
-------------------------------------------------------------------------------------------------------------------------
--- Name:		Markdown.lua
--- Version:		1.0 (1/17/2021)
--- Author:		Brad Sharp
---
--- Repository:	https://github.com/BradSharp/Romarkable
--- License:		MIT (https://github.com/BradSharp/Romarkable/blob/main/LICENSE)
---
--- Copyright (c) 2021 Brad Sharp
-------------------------------------------------------------------------------------------------------------------------
+local Components	= script:FindFirstAncestor("Components")
+local Roact			= require(Components.Roact)
+local assign		= require(Components.Roact.assign)
+local Theme			= require(Components.Common.Plugin.Theme)
+local Markdown		= require(script.Markdown)
 
-local Markdown = {}
+local AutoText		= Roact.PureComponent:extend("DynamicTextLabel")
+local AutoCode		= Roact.PureComponent:extend("DynamicCodeLabel")
 
-------------------------------------------------------------------------------------------------------------------------
--- Text Parser
-------------------------------------------------------------------------------------------------------------------------
-
-local ModifierType = {
-	None	= 0,
-	Bold	= 1,
-	Italic	= 2,
-	Strike	= 3,
-	Code	= 4,
-	Ref		= 5,
-}
-
-local ModifierLookup = {
-	["*"] = ModifierType.Bold,
-	["_"] = ModifierType.Italic,
-	["~"] = ModifierType.Strike,
-	["`"] = ModifierType.Code,
-}
-
-local ModifierTags = {
-	[ModifierType.Bold] = {"<b>", "</b>"},
-	[ModifierType.Italic] = {"<i>", "</i>"},
-	[ModifierType.Strike] = {"<s>", "</s>"},
-	[ModifierType.Code] = {"<font face=\"RobotoCode\">", "</font>"},
-}
-
-local function characters(s)
-	return s:gmatch(".")
-end
-
-local function last(t)
-	return t[#t]
-end
-
-local function parseText(md)
-	-- Asterisks are always passed as bold and underscores as italics.
-	local stack = {}
-	local s = ""
-	for c in characters(md) do
-		local modifierType = ModifierLookup[c]
-		if modifierType then
-			if last(stack) == modifierType then
-				s = s .. ModifierTags[modifierType][2]
-				table.remove(stack)
-			else
-				table.insert(stack, modifierType)
-				s = s .. ModifierTags[modifierType][1]
-			end
-		else
-			s = s .. c
-		end
-	end
-	return s
-end
-
-------------------------------------------------------------------------------------------------------------------------
--- Document Parser
-------------------------------------------------------------------------------------------------------------------------
-
-local BlockType = {
-	None		= 0,
-	Paragraph	= 1,
-	Heading		= 2,
-	Code		= 3,
-	List		= 4,
-	Ruler		= 5,
-	Quote		= 6,
-}
-
-local CombinedBlocks = {
-	[BlockType.None]		= true,
-	[BlockType.Paragraph]	= true,
-	[BlockType.Code]		= true,
-	[BlockType.List]		= true,
-	[BlockType.Quote]		= true,
-}
-
-local function clean(md)
-	return md:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub("\"", "&quot;"):gsub("'", "&apos;")
-end
-
-local function convertTabsToSpaces(s)
-	return s:gsub("\t", "    ")
-end
-
--- Iterator: Iterates the string line-by-line
-local function lines(s)
-	return (s .. "\n"):gmatch("(.-)\n")
-end
-
--- Iterator: Categorize each line and allows iteration
-local function blockLines(md)
-	local blockType = BlockType.None
-	local nextLine = lines(md)
-	local function it()
-		local line = nextLine()
-		if not line then
-			return
-		end
-		-- Code
-		if blockType == BlockType.Code then
-			if line:match("^```") then
-				blockType = BlockType.None
-			end
-			return BlockType.Code, line
-		end
-		-- Blank line
-		if line:match("^%s*$") then
-			return BlockType.None, ""
-		end
-		-- Ruler
-		if line:match("^\-\-\-+") or line:match("^===+") then
-			return BlockType.Ruler, ""
-		end
-		-- Heading
-		if line:match("^#") then
-			return BlockType.Heading, line
-		end
-		-- Code
-		if line:match("^```") then
-			blockType = BlockType.Code
-			return blockType, line
-		end
-		-- Quote
-		if line:match("^>%s") then
-			return BlockType.Quote, line
-		end
-		-- List
-		if line:match("^\-%s+") or line:match("^\*%s+") or line:match("^%d*\.%s+") then
-			return BlockType.List, line
-		end
-		-- Paragraph
-		return BlockType.Paragraph, line -- should take into account indentation of first-line
-	end
-	return it
-end
-
--- Iterator: Joins lines of the same type into a single element
-local function blocks(md)
-	local it = blockLines(md)
-	local lastBlockType, lastLine = it()
-	return function ()
-		-- This function works by performing a lookahead at the next line and then deciding what to do with the
-		-- previous line based on that.
-		local nextBlockType, nextLine = it()
-		if nextBlockType == BlockType.Ruler and lastBlockType == BlockType.Paragraph then
-			-- Combine paragraphs followed by rulers into headers
-			local text = lastLine
-			lastBlockType, lastLine = it()
-			return BlockType.Heading, ("#"):rep(lastLine:sub(1, 1) == "=" and 2 or 1) .. " " .. text
-		end
-		local lines = { lastLine }
-		while CombinedBlocks[nextBlockType] and nextBlockType == lastBlockType do
-			table.insert(lines, nextLine)
-			nextBlockType, nextLine = it()
-		end
-		local blockType, blockText = lastBlockType, table.concat(lines, "\n")
-		lastBlockType, lastLine = nextBlockType, nextLine
-		return blockType, blockText
+function AutoText:init()
+	self.state = { height = 0 }
+	self.boundsChanged = function (rbx)
+		self:setState({ height = rbx.TextBounds.Y })
 	end
 end
 
--- Iterator: Transforms raw blocks into sections with data
-local function sections(md, useRichText)
-	local nextBlock = blocks(md)
-	local function it()
-		local blockType, blockText = nextBlock()
-		if blockType == BlockType.None then
-			return it() -- skip this block type
-		end
-		local block = {}
-		if blockType then
-			local indent, text = blockText:match("^%s*()(.*)") -- TODO: This doesn't support tabs 
-			if not indent then
-				indent, text = 0, blockText
-			end
-			block.Indent = math.floor(indent / 2)
-			if blockType == BlockType.Paragraph then
-				block.Text = parseText(text)
-			elseif blockType == BlockType.Heading then
-				local level, text = blockText:match("^#+()%s*(.*)")
-				block.Level, block.Text = level - 1, text
-			elseif blockType == BlockType.Code then
-				local syntax, code = text:match("^```(.-)\n(.*)\n```$")
-				block.Syntax, block.Code = syntax, syntax == "raw" and code or clean(code)
-			elseif blockType == BlockType.List then
-				local lines = text:split("\n")
-				for _, line in ipairs(lines) do
-					parseText(line)
+function AutoText:render()
+	return Roact.createElement("TextLabel", assign({
+		Size = UDim2.new(1, 0, 0, self.state.height),
+		TextWrapped = true,
+		[Roact.Change.TextBounds] = self.boundsChanged
+	}, self.props))
+end
+
+function AutoCode:init()
+	self.state = { bounds = Vector2.new(0, 0) }
+	self.boundsChanged = function (rbx)
+		self:setState({ bounds = rbx.TextBounds })
+	end
+end
+
+function AutoCode:render()
+	local height = self.state.bounds.Y + 24
+	return Roact.createElement("ScrollingFrame", {
+		Size = UDim2.new(1, 0, 0, height > 320 and 300 or height),
+		Position = self.props.Position,
+		BackgroundColor3 = self.props.BackgroundColor3,
+		BorderColor3 = self.props.BorderColor3,
+		LayoutOrder = self.props.LayoutOrder,
+		BorderMode = Enum.BorderMode.Inset,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 8,
+		VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+		HorizontalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+		CanvasSize = UDim2.fromOffset(self.state.bounds.X + 24, height)
+	}, {
+		Code = Roact.createElement("TextLabel", assign({
+			Text = self.props.Text,
+			TextSize = self.props.TextSize,
+			TextColor3 = self.props.TextColor3,
+			Font = self.props.Font,
+			RichText = true,
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(12, 12),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			Size = UDim2.new(1, -24, 1, -24),
+			[Roact.Change.TextBounds] = self.boundsChanged
+		}))
+	})
+end
+
+return function (props)
+	return Theme.apply(function (theme)
+		local document = {}
+		
+		local i = 0
+		for blockType, block in Markdown.parse(props.Markdown) do
+			i = i + 1
+			
+			if blockType == Markdown.BlockType.Paragraph then
+				document[i] = Roact.createElement(AutoText, {
+					BackgroundTransparency = 1,
+					RichText = true,
+					Text = block.Text,
+					TextSize = 18,
+					TextColor3 = theme.Studio.Color.MainText,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextYAlignment = Enum.TextYAlignment.Top,
+					Font = theme.Font,
+					LayoutOrder = i
+				})
+			elseif blockType == Markdown.BlockType.Heading then
+				local height = 42 - block.Level * 6
+				document[i] = Roact.createElement(AutoText, {
+					BackgroundTransparency = 1,
+					RichText = true,
+					Text = "<b><uc>" .. block.Text .. "</uc></b>",
+					TextSize = height,
+					TextColor3 = theme.Studio.Color.MainText,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextYAlignment = Enum.TextYAlignment.Top,
+					Font = theme.Font,
+					LayoutOrder = i
+				})
+			elseif blockType == Markdown.BlockType.Code then
+				document[i] = Roact.createElement(AutoCode, {
+					BackgroundColor3 = theme.Studio.Color.ScriptBackground,
+					BorderColor3 = theme.Studio.Color.Border,
+					Text = block.Code,
+					TextSize = 18,
+					TextColor3 = theme.Studio.Color.ScriptText,
+					Font = Enum.Font.RobotoMono,
+					LayoutOrder = i
+				})
+			elseif blockType == Markdown.BlockType.List then
+				local text = ""
+				for _, line in ipairs(block.Lines) do
+					text = text .. ("  "):rep(line.Level) .. "- " .. line.Text .. "\n"
 				end
-				block.Lines = lines
-			elseif blockType == BlockType.Quote then
-				block.RawText, block.Iterator = text, sections(text, useRichText)
+				document[i] = Roact.createElement(AutoText, {
+					BackgroundTransparency = 1,
+					RichText = true,
+					Text = text,
+					TextSize = 18,
+					TextColor3 = theme.Studio.Color.MainText,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextYAlignment = Enum.TextYAlignment.Top,
+					Font = theme.Font,
+					LayoutOrder = i
+				})
 			end
+			
 		end
-		return blockType, block
-	end
-	return it		
+		
+		return Roact.createFragment({
+			Layout = Roact.createElement("UIListLayout", {
+				Padding = props.Padding or UDim.new(0, 12),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				[Roact.Change.AbsoluteContentSize] = props[Roact.Change.AbsoluteContentSize]
+			}),
+			Padding = Roact.createElement("UIPadding", {
+				PaddingTop = UDim.new(0, 12),
+				PaddingLeft = UDim.new(0, 12),
+				PaddingRight = UDim.new(0, 12),
+				PaddingBottom = UDim.new(0, 12),
+			}),
+			Document = Roact.createFragment(document)
+		})
+	end)
 end
-
-local function parseDocument(md)
-	return sections(convertTabsToSpaces(md), true)
-end
-
-------------------------------------------------------------------------------------------------------------------------
--- Exports
-------------------------------------------------------------------------------------------------------------------------
-
-Markdown.sanitize = clean
-Markdown.parse = parseDocument
-Markdown.parseText = parseText
-Markdown.BlockType = BlockType
-
-return Markdown
