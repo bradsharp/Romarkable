@@ -188,7 +188,7 @@ local function blockLines(md)
 			return BlockType.Quote, line
 		end
 		-- List
-		if line:match("^%s*%-%s+") or line:match("^%s*%*%s+") or line:match("^%s*%d*%.%s+") or line:match("^%s*%+%s+") then
+		if line:match("^%s*%-%s+") or line:match("^%s*%*%s+") or line:match("^%s*[%u%d]+%.%s+") or line:match("^%s*%+%s+") then
 			return BlockType.List, line
 		end
 		-- Paragraph
