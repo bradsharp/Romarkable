@@ -1,3 +1,14 @@
+------------------------------------------------------------------------------------------------------------------------
+-- Name:		Markdown.lua
+-- Version:		1.0 (1/17/2021)
+-- Author:		Brad Sharp
+--
+-- Repository:	https://github.com/BradSharp/Romarkable
+-- License:		MIT (https://github.com/BradSharp/Romarkable/blob/main/LICENSE)
+--
+-- Copyright (c) 2021 Brad Sharp
+------------------------------------------------------------------------------------------------------------------------
+
 local Markdown = {}
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -26,10 +37,6 @@ local ModifierTags = {
 	[ModifierType.Strike] = {"<s>", "</s>"},
 	[ModifierType.Code] = {"<font face=\"RobotoCode\">", "</font>"},
 }
-
-local function clean(md)
-	return md:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub("\"", "&quot;"):gsub("'", "&apos;")
-end
 
 local function characters(s)
 	return s:gmatch(".")
@@ -82,6 +89,10 @@ local CombinedBlocks = {
 	[BlockType.Quote]		= true,
 }
 
+local function clean(md)
+	return md:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub("\"", "&quot;"):gsub("'", "&apos;")
+end
+
 local function convertTabsToSpaces(s)
 	return s:gsub("\t", "    ")
 end
@@ -112,7 +123,7 @@ local function blockLines(md)
 			return BlockType.None, ""
 		end
 		-- Ruler
-		if line:match("^---") or line:match("^===") then
+		if line:match("^\-\-\-+") or line:match("^===+") then
 			return BlockType.Ruler, ""
 		end
 		-- Heading
@@ -141,24 +152,25 @@ end
 -- Iterator: Joins lines of the same type into a single element
 local function blocks(md)
 	local it = blockLines(md)
-	local blockType, line = it()
-	-- This function works by performing a lookahead at the next line and then deciding what to do with the
-	-- previous line based on that.
+	local lastBlockType, lastLine = it()
 	return function ()
-		local lines = { line }
+		-- This function works by performing a lookahead at the next line and then deciding what to do with the
+		-- previous line based on that.
 		local nextBlockType, nextLine = it()
-		--if lastBlockType == BlockType.Paragraph and nextBlockType == BlockType.Ruler then
-		--	local blockType, block = BlockType.Heading, lastLine
-		--	lastBlockType, lastLine = it()
-		--	return blockType, block
-		--end
-		while CombinedBlocks[nextBlockType] and nextBlockType == blockType do
+		if nextBlockType == BlockType.Ruler and lastBlockType == BlockType.Paragraph then
+			-- Combine paragraphs followed by rulers into headers
+			local text = lastLine
+			lastBlockType, lastLine = it()
+			return BlockType.Heading, ("#"):rep(lastLine:sub(1, 1) == "=" and 2 or 1) .. " " .. text
+		end
+		local lines = { lastLine }
+		while CombinedBlocks[nextBlockType] and nextBlockType == lastBlockType do
 			table.insert(lines, nextLine)
 			nextBlockType, nextLine = it()
 		end
-		local lastBlockType, lastBlock = blockType, table.concat(lines, "\n")
-		blockType, line = nextBlockType, nextLine
-		return lastBlockType, lastBlock
+		local blockType, blockText = lastBlockType, table.concat(lines, "\n")
+		lastBlockType, lastLine = nextBlockType, nextLine
+		return blockType, blockText
 	end
 end
 
@@ -184,7 +196,7 @@ local function sections(md, useRichText)
 				block.Level, block.Text = level - 1, text
 			elseif blockType == BlockType.Code then
 				local syntax, code = text:match("^```(.-)\n(.*)\n```$")
-				block.Syntax, block.Code = syntax, code --clean(code)
+				block.Syntax, block.Code = syntax, syntax == "raw" and code or clean(code)
 			elseif blockType == BlockType.List then
 				local lines = text:split("\n")
 				for _, line in ipairs(lines) do
