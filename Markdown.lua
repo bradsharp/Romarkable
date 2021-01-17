@@ -107,7 +107,6 @@ local function richText(md)
 		else
 			output = output .. text
 		end
-		warn(token and "TOKEN" or "TEXT", text)
 	end
 	for modifierType in pairs(state) do
 		output = output .. tags[modifierType][2]
