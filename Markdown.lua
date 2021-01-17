@@ -54,14 +54,14 @@ local function parseText(md)
 		local modifierType = ModifierLookup[c]
 		if modifierType then
 			if last(stack) == modifierType then
-				s = s .. ModifierTags[modifierType][2]
+				s ..= ModifierTags[modifierType][2]
 				table.remove(stack)
 			else
 				table.insert(stack, modifierType)
-				s = s .. ModifierTags[modifierType][1]
+				s ..= ModifierTags[modifierType][1]
 			end
 		else
-			s = s .. c
+			s ..= c
 		end
 	end
 	return s
