@@ -184,7 +184,7 @@ local function blockLines(md)
 			return blockType, line
 		end
 		-- Quote
-		if line:match("^%s*>%s") then
+		if line:match("^%s*>") then
 			return BlockType.Quote, line
 		end
 		-- List
@@ -255,7 +255,12 @@ local function blocks(md, markup)
 				end
 				block.Lines = lines
 			elseif blockType == BlockType.Quote then
-				block.RawText, block.Iterator = text, blocks(text, markup)
+				local lines = blockText:split("\n")
+				for i = 1, #lines do
+					lines[i] = lines[i]:match("^%s*>%s*(.*)")
+				end
+				local rawText = table.concat(lines, "\n")
+				block.RawText, block.Iterator = rawText, blocks(rawText, markup)
 			end
 		end
 		return blockType, block
